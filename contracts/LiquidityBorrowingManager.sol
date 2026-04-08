@@ -205,7 +205,7 @@ contract LiquidityBorrowingManager is
             unchecked {
                 ++i;
             }
-        }
+        }   
 
         emit CollectProtocol(recipient, tokens, amounts);
     }
