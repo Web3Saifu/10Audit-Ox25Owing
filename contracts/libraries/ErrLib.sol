@@ -25,7 +25,7 @@ library ErrLib {
      * @param condition The condition to check for reverting.
      * @param code The ErrorCode representing the specific error.
      */
-    function revertError(bool condition, ErrorCode code) internal pure {
+    function revertError(bool condition, ErrorCode code) internal pure {//যদি এই condition true হয় → error throw করবে
         if (condition) {
             revert RevertErrorCode(code);
         }

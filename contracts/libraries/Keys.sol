@@ -42,10 +42,10 @@ library Keys {
         for (uint256 i; i < length; ) {
             if (self.unsafeAccess(i).value == key) {
                 //@audit-info swap and pop
-                self.unsafeAccess(i).value = self.unsafeAccess(length - 1).value;
+                self.unsafeAccess(i).value = self.unsafeAccess(length - 1).value;//?p
                 self.pop();
                 break;
-            }
+            } 
             unchecked {
                 ++i;
             }

@@ -15,95 +15,95 @@ import "./libraries/ErrLib.sol";
 
 //@audit-info this is the entire protocol basically
 contract LiquidityBorrowingManager is
-    LiquidityManager,
-    OwnerSettings,
-    DailyRateAndCollateral,
-    ReentrancyGuard
+    LiquidityManager,//liquidity handle করছে
+    OwnerSettings,//👉 owner control manage করছে
+    DailyRateAndCollateral,//👉 interest + collateral হিসাব করছে
+    ReentrancyGuard//👉 reentrancy attack block করছে
 {
     using { Keys.removeKey, Keys.addKeyIfNotExists } for bytes32[];
-    using { ErrLib.revertError } for bool;
+    using { ErrLib.revertError } for bool;//যদি এই condition true হয় → error throw করবে
 
     /// @title BorrowParams
     /// @notice This struct represents the parameters required for borrowing.
     struct BorrowParams {
         /// @notice The pool fee level for the internal swap
-        uint24 internalSwapPoolfee;
+        uint24 internalSwapPoolfee;//Defines fee tier (like Uniswap pool fee: 0.05%, 0.3%, etc.)
         /// @notice The address of the token that will be sold to obtain the loan currency
-        address saleToken;
+        address saleToken;//saleToken = ETH
         /// @notice The address of the token that will be held
-        address holdToken;
+        address holdToken;//holdToken = USDC
         /// @notice The minimum amount of holdToken that must be obtained
-        uint256 minHoldTokenOut;
+        uint256 minHoldTokenOut;//?
         /// @notice The maximum amount of collateral that can be provided for the loan
-        uint256 maxCollateral;
+        uint256 maxCollateral;//?
         /// @notice The SwapParams struct representing the external swap parameters
-        SwapParams externalSwap;
+        SwapParams externalSwap;//If internal swap is not enough, use external DEX route.
         /// @notice An array of LoanInfo structs representing multiple loans
-        LoanInfo[] loans;
+        LoanInfo[] loans;//?
     }
     /// @title BorrowingInfo
     /// @notice This struct represents the borrowing information for a borrower.
     struct BorrowingInfo {
-        address borrower;
-        address saleToken;
-        address holdToken;
+        address borrower;//The user who opened the loan position,,Alice’s wallet address
+        address saleToken;// ETH ,,  collateral হিসেবে ব্যবহার করবে লেনদেনের জন্য Alice’s ETH is used in the borrowing/swap process.
+        address holdToken;//USDC ,,USDC ধার নিচ্ছ,,This is what Alice receives and owes back.
         /// @notice The amount of fees owed by the creditor
-        uint256 feesOwed;
+        uint256 feesOwed;//interest rate = 5% per day
         /// @notice The amount borrowed by the borrower
-        uint256 borrowedAmount;
+        uint256 borrowedAmount;//Main loan amount = 1000 USDC
         /// @notice The amount of liquidation bonus
-        uint256 liquidationBonus;
+        uint256 liquidationBonus;//10%
         /// @notice The accumulated loan rate per share
-        uint256 accLoanRatePerSeconds;
+        uint256 accLoanRatePerSeconds;//accLoanRatePerSeconds = 0.0000000016
         /// @notice The daily rate collateral balance multiplied by COLLATERAL_BALANCE_PRECISION
-        uint256 dailyRateCollateralBalance;
+        uint256 dailyRateCollateralBalance;//Collateral / Borrowed = 1200 / 1000 = 1.2 ,,   “Alice-এর collateral কতটা শক্ত আছে, সেই strength-এর একটা score”
     }
     /// @notice This struct used for caching variables inside a function 'borrow'
     struct BorrowCache {
-        uint256 dailyRateCollateral;
-        uint256 accLoanRatePerSeconds;
-        uint256 borrowedAmount;
-        uint256 holdTokenBalance;
+        uint256 dailyRateCollateral;//1.2 (means collateral is 120% of loan)
+        uint256 accLoanRatePerSeconds;//0.00001 (small growth rate per second)
+        uint256 borrowedAmount;//1000 USDC  ,, How much Alice borrowed
+        uint256 holdTokenBalance;//1000 USDC  ,,How much USDC Alice receives during borrow process
     }
     /// @notice Struct representing the extended borrowing information.
-    struct BorrowingInfoExt {
+    struct BorrowingInfoExt {//“Main loan summary of Alice”
         /// @notice The main borrowing information.
         BorrowingInfo info;
         /// @notice An array of LoanInfo structs representing multiple loans
-        LoanInfo[] loans;
+        LoanInfo[] loans;//👉 Alice may have more than one loan inside system,,“All Alice’s loans together”
         /// @notice The balance of the collateral.
         int256 collateralBalance;
         /// @notice The estimated lifetime of the loan.
-        uint256 estimatedLifeTime;
+        uint256 estimatedLifeTime;//How long Alice’s loan can survive before becoming unsafe,,3 days left
         /// borrowing Key
-        bytes32 key;
+        bytes32 key;//Unique ID for Alice’s borrowing position,,0xabc123...,,  0xabc123,,“Loan ID of Alice”
     }
 
     /// @title RepayParams
     /// @notice This struct represents the parameters required for repaying a loan.
     struct RepayParams {
         /// @notice The activation of the emergency liquidity restoration mode (available only to the lender)
-        bool isEmergency;
+        bool isEmergency;//“Is this a special emergency repay?”,, If Alice (or lender) wants to do emergency repay,,false → normal repay,,true → forced fast repay mode
         /// @notice The pool fee level for the internal swap
-        uint24 internalSwapPoolfee;
+        uint24 internalSwapPoolfee;//3000 = 0.3% pool fee  ,,👉 Fee level used when swapping inside protocol (Uniswap pool fee)
         /// @notice The external swap parameters for the repayment transaction
-        SwapParams externalSwap;
+        SwapParams externalSwap;// If Alice needs external swap (like ETH → USDC)
         /// @notice The unique borrowing key associated with the loan
-        bytes32 borrowingKey;
+        bytes32 borrowingKey;//👉 Unique ID of Alice’s loan
         /// @notice The slippage allowance for the swap in basis points (1/10th of a percent)
-        uint256 swapSlippageBP1000;
+        uint256 swapSlippageBP1000;//👉 Maximum allowed price difference during swap,,100 = 1% slippage
     }
     /// borrowingKey=>LoanInfo
-    mapping(bytes32 => LoanInfo[]) public loansInfo;
+    mapping(bytes32 => LoanInfo[]) public loansInfo;//“All Alice’s individual loan parts”
     /// borrowingKey=>BorrowingInfo
-    mapping(bytes32 => BorrowingInfo) public borrowingsInfo;
+    mapping(bytes32 => BorrowingInfo) public borrowingsInfo;//“Full loan summary of Alice”
     /// borrower => BorrowingKeys[]
-    mapping(address => bytes32[]) public userBorrowingKeys;
+    mapping(address => bytes32[]) public userBorrowingKeys;//All loan IDs owned by Alice
     /// NonfungiblePositionManager tokenId => BorrowingKeys[]
-    mapping(uint256 => bytes32[]) public tokenIdToBorrowingKeys;
+    mapping(uint256 => bytes32[]) public tokenIdToBorrowingKeys;//“Which loan belongs to which NFT collateral”,, NFT TokenID 101 → [0xABC123]
 
     ///  token => FeesAmt
-    mapping(address => uint256) private platformsFeesInfo;
+    mapping(address => uint256) private platformsFeesInfo;//“Protocol’s earning balance (per token)”
 
     /// Indicates that a borrower has made a new loan
     event Borrow(
@@ -115,27 +115,27 @@ contract LiquidityBorrowingManager is
         uint256 dailyRatePrepayment
     );
     /// Indicates that a borrower has repaid their loan, optionally with the help of a liquidator
-    event Repay(address borrower, address liquidator, bytes32 borrowingKey);
+    event Repay(address borrower, address liquidator, bytes32 borrowingKey);//Repay(Alice, Alice, 0xABC123),,or liquidation case:,,Repay(Alice, Bob, 0xABC123)
     /// Indicates that a loan has been closed due to an emergency situation
     event EmergencyLoanClosure(address borrower, address lender, bytes32 borrowingKey);
     /// Indicates that the protocol has collected fee tokens
-    event CollectProtocol(address recipient, address[] tokens, uint256[] amounts);
+    event CollectProtocol(address recipient, address[] tokens, uint256[] amounts);//“Protocol owner collected fees”,,CollectProtocol(Admin, [USDC, ETH], [5000, 2])
     /// Indicates that the daily interest rate for holding token(for specific pair) has been updated
-    event UpdateHoldTokenDailyRate(address saleToken, address holdToken, uint256 value);
+    event UpdateHoldTokenDailyRate(address saleToken, address holdToken, uint256 value);//UpdateHoldTokenDailyRate(ETH, USDC, 5%)
     /// Indicates that a borrower has increased their collateral balance for a loan
-    event IncreaseCollateralBalance(address borrower, bytes32 borrowingKey, uint256 collateralAmt);
+    event IncreaseCollateralBalance(address borrower, bytes32 borrowingKey, uint256 collateralAmt);//IncreaseCollateralBalance(Alice, 0xABC123, 100 USDC)
     /// Indicates that a new borrower has taken over the debt from an old borrower
-    event TakeOverDebt(
+    event TakeOverDebt(//TakeOverDebt(Alice, Bob, 0xABC123, 0xXYZ999),,“Bob took over Alice’s loan”
         address oldBorrower,
         address newBorrower,
         bytes32 oldBorrowingKey,
         bytes32 newBorrowingKey
     );
 
-    error TooLittleReceivedError(uint256 minOut, uint256 out);
+    error TooLittleReceivedError(uint256 minOut, uint256 out);// “You received less tokens than expected”,,TooLittleReceivedError(1000, 900)
 
     /// @dev Modifier to check if the current block timestamp is before or equal to the deadline.
-    modifier checkDeadline(uint256 deadline) {
+    modifier checkDeadline(uint256 deadline) {//deadline = 1000 (timestamp)
         (_blockTimestamp() > deadline).revertError(ErrLib.ErrorCode.TOO_OLD_TRANSACTION);
         _;
     }
@@ -146,10 +146,10 @@ contract LiquidityBorrowingManager is
 
     //@audit-ok nothing to see here
     constructor(
-        address _underlyingPositionManagerAddress,
-        address _underlyingQuoterV2,
-        address _underlyingV3Factory,
-        bytes32 _underlyingV3PoolInitCodeHash
+        address _underlyingPositionManagerAddress,//Uniswap V3 Position Manager contract
+        address _underlyingQuoterV2,//Uniswap V3 Quoter contract ,,“swap করলে কত পাবি?” calculator
+        address _underlyingV3Factory,//pool generator,,ETH/USDC, ETH/DAI pool তৈরি করে
+        bytes32 _underlyingV3PoolInitCodeHash//pool address formula key
     )
         LiquidityManager(
             _underlyingPositionManagerAddress,
@@ -166,18 +166,18 @@ contract LiquidityBorrowingManager is
      * @param isAllowed A boolean indicating whether the swap call is allowed or not.
      */
     //@audit-ok owner only so all good
-    function setSwapCallToWhitelist(
-        address swapTarget,
-        bytes4 funcSelector,
-        bool isAllowed
+    function setSwapCallToWhitelist(//✅ Allow or block specific external swap calls,,কোন external contract-এর কোন function call করা যাবে — সেটা allow/block করা
+        address swapTarget,// কোন contract call হবে ,, UniswapRouter
+        bytes4 funcSelector,// কোন function call হবে ,, Inside a contract (like Uniswap), there are many functions:bytes4 funcSelector swap
+        bool isAllowed //isAllowed = true
     ) external onlyOwner {
 
         //@audit-info certain targets or functions are blocked
         (swapTarget == VAULT_ADDRESS ||
             swapTarget == address(this) ||
             swapTarget == address(underlyingPositionManager) ||
-            funcSelector == IERC20.transferFrom.selector).revertError(ErrLib.ErrorCode.FORBIDDEN);
-        whitelistedCall[swapTarget][funcSelector] = isAllowed;
+            funcSelector == IERC20.transferFrom.selector).revertError(ErrLib.ErrorCode.FORBIDDEN);//a custom error  FORBIDDEN  //ডিফল্ট ভাবে এটা অনুমতি থাকে না, //যদি user ভুল করে বা malicious ভাবে transferFrom call দিতে চায়  
+        whitelistedCall[swapTarget][funcSelector] = isAllowed; //swapTarget = Uniswap contract ,,funcSelector = swap function,,whitelistedCall[Uniswap][swap] = true
     }
 
     /**
@@ -189,15 +189,16 @@ contract LiquidityBorrowingManager is
      */
 
     //@audit-ok as long as platformFeesInfo is set correctly then this is totally fine
-    function collectProtocol(address recipient, address[] calldata tokens) external onlyOwner {
-        uint256[] memory amounts = new uint256[](tokens.length);
+    function collectProtocol(address recipient, address[] calldata tokens) external onlyOwner {//Protocol যে fee জমিয়েছে → owner নিয়ে যাবে //recipient = কে fee পাবে,,tokens[] = কোন কোন token-এর fee collect হবে
+        uint256[] memory amounts = new uint256[](tokens.length);//(recipient, [USDC, ETH]
         for (uint256 i; i < tokens.length; ) {
             address token = tokens[i];
 
             //@audit-info divide by 1e18 because platformFeesInfo is scaled by it
-            uint256 amount = platformsFeesInfo[token] / Constants.COLLATERAL_BALANCE_PRECISION;
+           
+            uint256 amount = platformsFeesInfo[token] / Constants.COLLATERAL_BALANCE_PRECISION;//?
             if (amount > 0) {
-                platformsFeesInfo[token] = 0;
+                platformsFeesInfo[token] = 0;//"fee already collected"
                 amounts[i] = amount;
                 Vault(VAULT_ADDRESS).transferToken(token, recipient, amount);
             }
