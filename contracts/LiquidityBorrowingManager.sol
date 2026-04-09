@@ -6,7 +6,7 @@ import "./abstract/LiquidityManager.sol";
 import "./abstract/OwnerSettings.sol";
 import "./abstract/DailyRateAndCollateral.sol";
 import "./libraries/ErrLib.sol";
-
+//1000% Right Methodology
 /**
  * @title LiquidityBorrowingManager
  * @dev This contract manages the borrowing liquidity functionality for WAGMI Leverage protocol.
@@ -95,13 +95,13 @@ contract LiquidityBorrowingManager is
         uint256 swapSlippageBP1000;//👉 Maximum allowed price difference during swap,,100 = 1% slippage
     }
     /// borrowingKey=>LoanInfo
-    mapping(bytes32 => LoanInfo[]) public loansInfo;//“All Alice’s individual loan parts”
+    mapping(bytes32 => LoanInfo[]) public loansInfo;//“All Alice’s individual loan parts”,,Loan 1:- 100 USDC borrowed,,- tokenId = 101
     /// borrowingKey=>BorrowingInfo
     mapping(bytes32 => BorrowingInfo) public borrowingsInfo;//“Full loan summary of Alice”
     /// borrower => BorrowingKeys[]
     mapping(address => bytes32[]) public userBorrowingKeys;//All loan IDs owned by Alice
     /// NonfungiblePositionManager tokenId => BorrowingKeys[]
-    mapping(uint256 => bytes32[]) public tokenIdToBorrowingKeys;//“Which loan belongs to which NFT collateral”,, NFT TokenID 101 → [0xABC123]
+    mapping(uint256 => bytes32[]) public tokenIdToBorrowingKeys;//“Which loan belongs to which NFT collateral”,, NFT TokenID 101 → [0xABC123] ,,[0xABrrC123] ,,👉 ALWAYS potentially multiple
 
     ///  token => FeesAmt
     mapping(address => uint256) private platformsFeesInfo;//“Protocol’s earning balance (per token)”
@@ -193,20 +193,20 @@ contract LiquidityBorrowingManager is
     function collectProtocol(address recipient, address[] calldata tokens) external onlyOwner {//Protocol যে fee জমিয়েছে → owner নিয়ে যাবে //recipient = কে fee পাবে,,tokens[] = কোন কোন token-এর fee collect হবে
         uint256[] memory amounts = new uint256[](tokens.length);//(recipient, [USDC, ETH]
         for (uint256 i; i < tokens.length; ) {
-            address token = tokens[i];
+            address token = tokens[i];//কোন token
 
             //@audit-info divide by 1e18 because platformFeesInfo is scaled by it
            
             uint256 amount = platformsFeesInfo[token] / Constants.COLLATERAL_BALANCE_PRECISION;//?
             if (amount > 0) {
-                platformsFeesInfo[token] = 0;//"fee already collected"
-                amounts[i] = amount;
+                platformsFeesInfo[token] = 0;//"fee already collected"//first calculate ,,state update first
+                amounts[i] = amount;//কোন token
                 Vault(VAULT_ADDRESS).transferToken(token, recipient, amount);
             }
             unchecked {
                 ++i;
             }
-        }   
+        }
 
         emit CollectProtocol(recipient, tokens, amounts);
     }
@@ -223,15 +223,15 @@ contract LiquidityBorrowingManager is
 
     //@audit-ok all good 
     //@audit-info only called by operator
-    function updateHoldTokenDailyRate(
-        address saleToken,
-        address holdToken,
+    function updateHoldTokenDailyRate(//একটা token pair (USDC–ETH) এর daily interest rate update করা
+        address saleToken,//saleToken = ETH
+        address holdToken,//holdToken = USDC
         uint256 value
     ) external {
-        (msg.sender != dailyRateOperator).revertError(ErrLib.ErrorCode.INVALID_CALLER);
+        (msg.sender != dailyRateOperator).revertError(ErrLib.ErrorCode.INVALID_CALLER);//Only operator allowed
 
-        //@audit-info input validation
-        if (value > Constants.MAX_DAILY_RATE || value < Constants.MIN_DAILY_RATE) {
+        //@audit-info input validation//rate must be valid (too big/small না)
+        if (value > Constants.MAX_DAILY_RATE || value < Constants.MIN_DAILY_RATE) {// 1%  ,, // 0.05 %
             revert InvalidSettingsValue(value);
         }
         // If the value is within the acceptable range, the function updates the currentDailyRate property
@@ -239,11 +239,11 @@ contract LiquidityBorrowingManager is
 
         //@audit-info from DailyRateAndCollateral
         //updates accLoanRatePerSeconds and latestUpTimestamp
-        (, TokenInfo storage holdTokenRateInfo) = _updateTokenRateInfo(saleToken, holdToken);
+        (, TokenInfo storage holdTokenRateInfo) = _updateTokenRateInfo(saleToken, holdToken);// getting currentrate from holTokenInfo
 
         //@audit-info holdTokenRateInfo is a storage ref so this updates
         //the daily rate
-        holdTokenRateInfo.currentDailyRate = value;
+        holdTokenRateInfo.currentDailyRate = value;//এটা আসলে ম্যানুয়ালি দেওয়া রেট saving to storage
         emit UpdateHoldTokenDailyRate(saleToken, holdToken, value);
     }
 
@@ -258,10 +258,10 @@ contract LiquidityBorrowingManager is
     function checkDailyRateCollateral(
 
         //@audit-info borrow key is borrower, sale, loan
-        bytes32 borrowingKey
+        bytes32 borrowingKey //এই borrowing কোনটা সেটা identify করছে
     ) external view returns (int256 balance, uint256 estimatedLifeTime) {
-        (, balance, estimatedLifeTime) = _getDebtInfo(borrowingKey);
-        balance /= int256(Constants.COLLATERAL_BALANCE_PRECISION);
+        (, balance, estimatedLifeTime) = _getDebtInfo(borrowingKey);//balance = 1000000000000000000 (raw precision value) ,,estimatedLifeTime =86400 sec
+        balance /= int256(Constants.COLLATERAL_BALANCE_PRECISION);//raw value → readable value
     }
 
     /**
@@ -271,19 +271,26 @@ contract LiquidityBorrowingManager is
      * @param borrowingKey The unique key associated with the borrowing
      * @return loans An array containing LoanInfo structs representing the loans associated with the borrowing key
      */
-    function getLoansInfo(bytes32 borrowingKey) external view returns (LoanInfo[] memory loans) {
-        loans = loansInfo[borrowingKey];
+    function getLoansInfo(bytes32 borrowingKey) external view returns (LoanInfo[] memory loans) {//একটা borrowing key এর সব loan গুলো return করে (read-only)
+        loans = loansInfo[borrowingKey];//একটা loan এর amount + identity (ID) store করে
     }
 
     /**
      * @notice Retrieves the borrowing information for a specific NonfungiblePositionManager tokenId.
      * @param tokenId The unique identifier of the PositionManager token.
+     * 
      * @return extinfo An array of BorrowingInfoExt structs representing the borrowing information.
+     * tokenIdToBorrowingKeys[101] =
+[
+  0xABC123,
+  0xXYZ999
+]
+এই NFT এর সাথে 2টা borrowing position linked
      */
-    function getLenderCreditsInfo(
-        uint256 tokenId
+    function getLenderCreditsInfo(//একটা NFT position (tokenId) এর সাথে যত borrowing যুক্ত আছে, সব loan info বের করে আনে
+        uint256 tokenId//কোন NFT position এর data চাই
     ) external view returns (BorrowingInfoExt[] memory extinfo) {
-        bytes32[] memory borrowingKeys = tokenIdToBorrowingKeys[tokenId];
+        bytes32[] memory borrowingKeys = tokenIdToBorrowingKeys[tokenId];//এই NFT এর সাথে কোন কোন borrowing linked আছে
         extinfo = _getDebtsInfo(borrowingKeys);
     }
 
@@ -1211,12 +1218,12 @@ contract LiquidityBorrowingManager is
     /// @param borrowingKeys The array of borrowing keys to retrieve the debt information for.
     /// @return extinfo An array of BorrowingInfoExt structs representing the borrowing information.
     function _getDebtsInfo(
-        bytes32[] memory borrowingKeys
-    ) private view returns (BorrowingInfoExt[] memory extinfo) {
+        bytes32[] memory borrowingKeys//borrowingKeys = [0xAAA, 0xBBB, 0xCCC]
+    ) private view returns (BorrowingInfoExt[] memory extinfo) {//যতগুলো borrowingKey আছে, ঠিক ততগুলো “BorrowingInfoExt” রাখার জন্য একটা array বানানো হচ্ছে
         extinfo = new BorrowingInfoExt[](borrowingKeys.length);
-        for (uint256 i; i < borrowingKeys.length; ) {
-            bytes32 key = borrowingKeys[i];
-            extinfo[i].key = key;
+        for (uint256 i; i < borrowingKeys.length; ) {//যতগুলো borrowingKey আছে, ঠিক ততগুলো “BorrowingInfoExt” রাখার জন্য একটা array বানানো হচ্ছে
+            bytes32 key = borrowingKeys[i];//👉 array থেকে একটা borrowing ID বের করছে,,i = 0 → key = 0xAAA,,i = 1 → key = 0xBBB,,
+            extinfo[i].key = key;//extinfo[0].key = 0xAAA
             extinfo[i].loans = loansInfo[key];
             (
                 extinfo[i].info,

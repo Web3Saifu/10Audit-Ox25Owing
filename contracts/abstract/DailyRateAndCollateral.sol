@@ -79,7 +79,7 @@ abstract contract DailyRateAndCollateral {
         address saleToken,
         address holdToken
     ) internal returns (uint256 currentDailyRate, TokenInfo storage holdTokenRateInfo) {
-        bytes32 key = Keys.computePairKey(saleToken, holdToken);
+        bytes32 key = Keys.computePairKey(saleToken, holdToken);//key = computePairKey(ETH, USDC)
         holdTokenRateInfo = holdTokenInfo[key];
         currentDailyRate = holdTokenRateInfo.currentDailyRate;
         if (currentDailyRate == 0) {
