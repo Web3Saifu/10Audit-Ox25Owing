@@ -1214,6 +1214,7 @@ contract LiquidityBorrowingManager is
         }
     }
 
+
     /// @notice Retrieves the debt information for the specified borrowing keys.
     /// @param borrowingKeys The array of borrowing keys to retrieve the debt information for.
     /// @return extinfo An array of BorrowingInfoExt structs representing the borrowing information.
