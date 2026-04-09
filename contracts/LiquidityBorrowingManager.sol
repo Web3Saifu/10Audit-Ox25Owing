@@ -221,6 +221,7 @@ contract LiquidityBorrowingManager is
      * @dev The value must be within the range of MIN_DAILY_RATE and MAX_DAILY_RATE.
      */
 
+
     //@audit-ok all good 
     //@audit-info only called by operator
     function updateHoldTokenDailyRate(//একটা token pair (USDC–ETH) এর daily interest rate update করা
